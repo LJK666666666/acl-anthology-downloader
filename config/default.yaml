@@ -1,0 +1,44 @@
+# ACL Anthology 论文下载工具 - 默认配置文件
+# 您可以根据需要修改这些配置项
+
+# 网络爬虫配置
+scraper:
+  base_url: "https://aclanthology.org"
+  events_url: "https://aclanthology.org/events/"
+  delay: 0.5                    # 请求间隔（秒），避免对服务器造成压力
+  timeout: 30                   # 请求超时时间（秒）
+  max_retries: 3                # 最大重试次数
+  retry_delay: 1.0             # 重试延迟（秒）
+
+# 下载器配置
+downloader:
+  output_dir: "papers"                      # 输出目录
+  max_download: null                        # 最大下载数量，null表示下载全部
+  download_abstracts: true                  # 是否下载摘要
+  create_year_dirs: true                    # 是否创建年份子目录
+  create_venue_dirs: true                   # 是否创建会议子目录
+  max_filename_length: 100                  # 文件名最大长度
+
+# 命令行界面配置
+cli:
+  supported_venues:                         # 支持的会议列表
+    - "ACL"
+    - "EMNLP"
+    - "NAACL"
+    - "EACL"
+    - "COLING"
+    - "AACL"
+    - "WMT"
+    - "SEMEVAL"
+    - "CoNLL"
+    - "LREC"
+    - "INTERSPEECH"
+    - "ICASSP"
+  show_progress: true                       # 显示进度条
+  verbose: false                            # 详细输出
+
+# 日志配置
+logging:
+  level: "INFO"                            # 日志级别: DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: null                               # 日志文件路径，null表示输出到控制台
