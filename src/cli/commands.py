@@ -74,7 +74,8 @@ def download(ctx, venue, start_year, end_year, output, max_download, no_abstract
         click.echo(f"错误: {error_msg}")
         sys.exit(1)
 
-    # 更新配置
+    # 更新配置（规范化为绝对路径）
+    output = os.path.abspath(output)
     config.set('downloader', 'output_dir', output)
     if max_download:
         config.set('downloader', 'max_download', max_download)

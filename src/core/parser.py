@@ -28,8 +28,8 @@ class PaperParser:
 
         # 尝试不同的选择器来找到论文元素
         paper_elements = (
-            soup.find_all('p', class_='d-sm-flex align-items-stretch') or
-            soup.find_all('div', class_='card-body') or
+            soup.select('div.d-sm-flex.align-items-stretch') or
+            soup.select('p.d-sm-flex.align-items-stretch') or
             soup.find_all('div', class_='paper') or
             soup.find_all('li', class_='paper')
         )
@@ -76,9 +76,8 @@ class PaperParser:
             pdf_url = None
             abstract_id = None
 
-            links = element.find_all('a', href=True)
-            for link in links:
-                href = link['href']
+            for link in element.find_all('a'):
+                href = link.get('href', '')
                 link_text = link.get_text().lower().strip()
 
                 # PDF链接
@@ -88,9 +87,11 @@ class PaperParser:
                     else:
                         pdf_url = f"{BASE_URL}{href}"
 
-                # 摘要链接
-                elif ('abs' in link_text or 'abstract' in link_text) and '#' in href:
-                    abstract_id = href.split('#')[-1]
+                # 摘要链接 (支持 href 和 data-bs-target)
+                elif 'abs' in link_text or 'abstract' in link_text:
+                    target = href if '#' in href else link.get('data-bs-target', '')
+                    if '#' in target:
+                        abstract_id = target.split('#')[-1]
 
             # 必须有PDF链接才算有效论文
             if pdf_url:
@@ -173,8 +174,8 @@ class PaperParser:
         try:
             soup = BeautifulSoup(html, 'html.parser')
             paper_elements = (
-                soup.find_all('p', class_='d-sm-flex align-items-stretch') or
-                soup.find_all('div', class_='card-body')
+                soup.select('div.d-sm-flex.align-items-stretch') or
+                soup.select('p.d-sm-flex.align-items-stretch')
             )
             return len(paper_elements)
         except Exception:

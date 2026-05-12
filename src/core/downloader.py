@@ -29,7 +29,7 @@ class PaperDownloader:
             config: 配置对象
         """
         self.config = config or Config()
-        self.output_dir = self.config.get('downloader', 'output_dir', 'papers')
+        self.output_dir = os.path.abspath(self.config.get('downloader', 'output_dir', 'papers'))
         self.download_abstracts = self.config.get('downloader', 'download_abstracts', True)
         self.max_filename_length = self.config.get('downloader', 'max_filename_length', 100)
         self.create_year_dirs = self.config.get('downloader', 'create_year_dirs', True)
