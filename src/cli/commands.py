@@ -50,54 +50,145 @@ def cli(ctx, config, verbose):
 
 
 @cli.command()
-@click.option('--venue', '-v', required=True, type=str, help='会议名称 (如 ACL, EMNLP, NAACL)')
-@click.option('--start-year', '-s', required=True, type=int, help='开始年份')
-@click.option('--end-year', '-e', required=True, type=int, help='结束年份')
+@click.option('--venue', '-v', type=str, help='会议名称 (如 ACL, EMNLP, NAACL)')
+@click.option('--start-year', '-s', type=int, help='开始年份')
+@click.option('--end-year', '-e', type=int, help='结束年份')
 @click.option('--output', '-o', default='papers', type=str, help='输出目录 (默认: papers)')
 @click.option('--max-download', '-n', type=int, help='最大下载数量')
 @click.option('--no-abstract', is_flag=True, help='不下载摘要')
 @click.option('--dry-run', is_flag=True, help='仅获取论文列表，不下载')
+@click.option('--resume', '-r', is_flag=True, help='从 metadata.json 恢复，只下载缺失/失败的论文（跳过网页爬取）')
 @click.pass_context
-def download(ctx, venue, start_year, end_year, output, max_download, no_abstract, dry_run):
+def download(ctx, venue, start_year, end_year, output, max_download, no_abstract, dry_run, resume):
     """下载指定会议和年份范围的论文"""
 
     config = ctx.obj['config']
 
-    # 验证输入参数
-    if not is_valid_venue(venue, SUPPORTED_VENUES):
-        click.echo(f"错误: 不支持的会议 '{venue}'")
-        click.echo(f"支持的会议: {', '.join(SUPPORTED_VENUES)}")
-        sys.exit(1)
-
-    is_valid, error_msg = validate_year_range(start_year, end_year)
-    if not is_valid:
-        click.echo(f"错误: {error_msg}")
-        sys.exit(1)
-
     # 更新配置（规范化为绝对路径）
     output = os.path.abspath(output)
     config.set('downloader', 'output_dir', output)
-    if max_download:
-        config.set('downloader', 'max_download', max_download)
-    config.set('downloader', 'download_abstracts', not no_abstract)
 
-    click.echo(f"\n目标会议: {venue}")
-    click.echo(f"时间范围: {start_year}-{end_year}")
-    click.echo(f"输出目录: {output}")
-    if max_download:
-        click.echo(f"最大下载数量: {max_download}")
-    click.echo(f"下载摘要: {'是' if not no_abstract else '否'}")
+    # Resume 模式：从 metadata.json 读取论文列表
+    if resume:
+        import json
+        from src.models.paper import Paper
 
-    try:
-        # 获取论文列表
-        scraper_manager = PaperScraperManager(config)
-        paper_list = scraper_manager.scrape_papers(venue, start_year, end_year, max_download)
-
-        if not paper_list.papers:
-            click.echo("\n未找到任何论文，请检查会议名称和年份范围")
+        metadata_path = os.path.join(output, "metadata.json")
+        if not os.path.exists(metadata_path):
+            click.echo(f"错误: 找不到 metadata.json 文件: {metadata_path}")
+            click.echo("提示: --resume 选项需要先运行过一次下载，生成 metadata.json")
             sys.exit(1)
 
-        click.echo(f"\n找到 {len(paper_list)} 篇论文")
+        click.echo(f"📂 Resume 模式：从 {metadata_path} 读取论文列表")
+
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            # 重建 Paper 对象
+            papers = []
+            for item in metadata:
+                paper = Paper(
+                    title=item['title'],
+                    pdf_url=item['pdf_url'],
+                    venue=item['venue'],
+                    year=item['year'],
+                    abstract_id=item.get('abstract_id')
+                )
+                papers.append(paper)
+
+            venue = papers[0].venue if papers else venue
+            year_set = set(p.year for p in papers)
+            year_range = f"{min(year_set)}-{max(year_set)}" if year_set else "未知"
+
+            click.echo(f"\n目标会议: {venue}")
+            click.echo(f"时间范围: {year_range}")
+            click.echo(f"输出目录: {output}")
+            click.echo(f"从 metadata 加载了 {len(papers)} 篇论文")
+
+            # 统计缺失/失败的论文
+            missing_count = 0
+            incomplete_count = 0
+
+            with PaperDownloader(config) as downloader:
+                for paper in papers:
+                    pdf_path, _ = downloader._get_file_paths(paper)
+                    if not os.path.exists(pdf_path):
+                        missing_count += 1
+                    elif os.path.getsize(pdf_path) < 1024:
+                        incomplete_count += 1
+
+            need_download = missing_count + incomplete_count
+            click.echo(f"需要下载: {need_download} 篇 (缺失: {missing_count}, 不完整: {incomplete_count})")
+
+            if need_download == 0:
+                click.echo("\n✅ 所有论文都已下载完成！")
+                return
+
+            paper_list = PaperList(papers)
+
+        except Exception as e:
+            click.echo(f"错误: 读取 metadata.json 失败: {e}")
+            sys.exit(1)
+
+    else:
+        # 正常模式：验证参数并爬取
+        if not venue:
+            click.echo("错误: 正常模式需要指定 --venue 参数")
+            sys.exit(1)
+        if not start_year or not end_year:
+            click.echo("错误: 正常模式需要指定 --start-year 和 --end-year 参数")
+            sys.exit(1)
+
+        # 验证输入参数
+        if not is_valid_venue(venue, SUPPORTED_VENUES):
+            click.echo(f"错误: 不支持的会议 '{venue}'")
+            click.echo(f"支持的会议: {', '.join(SUPPORTED_VENUES)}")
+            sys.exit(1)
+
+        is_valid, error_msg = validate_year_range(start_year, end_year)
+        if not is_valid:
+            click.echo(f"错误: {error_msg}")
+            sys.exit(1)
+
+        if max_download:
+            config.set('downloader', 'max_download', max_download)
+        config.set('downloader', 'download_abstracts', not no_abstract)
+
+        click.echo(f"\n目标会议: {venue}")
+        click.echo(f"时间范围: {start_year}-{end_year}")
+        click.echo(f"输出目录: {output}")
+        if max_download:
+            click.echo(f"最大下载数量: {max_download}")
+        click.echo(f"下载摘要: {'是' if not no_abstract else '否'}")
+
+        try:
+            # 获取论文列表
+            scraper_manager = PaperScraperManager(config)
+            paper_list = scraper_manager.scrape_papers(venue, start_year, end_year, max_download)
+
+            if not paper_list.papers:
+                click.echo("\n未找到任何论文，请检查会议名称和年份范围")
+                sys.exit(1)
+
+            click.echo(f"\n找到 {len(paper_list)} 篇论文")
+
+        except KeyboardInterrupt:
+            click.echo("\n\n获取论文列表被用户中断")
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"\n获取论文列表时出错: {e}")
+            if config.get('cli', 'verbose', False):
+                import traceback
+                traceback.print_exc()
+            sys.exit(1)
+
+    # 通用下载流程（resume 和正常模式都走这里）
+    try:
+        # 设置下载选项
+        if max_download:
+            config.set('downloader', 'max_download', max_download)
+        config.set('downloader', 'download_abstracts', not no_abstract)
 
         if dry_run:
             click.echo("\n--- 论文列表 (仅显示前10篇) ---")
@@ -110,8 +201,14 @@ def download(ctx, venue, start_year, end_year, output, max_download, no_abstract
 
         # 下载论文
         click.echo("\n开始下载...")
-        with PaperDownloader(config) as downloader:
-            success_count = downloader.download_papers(paper_list.papers, max_download)
+        with PaperDownloader(config, resume_mode=resume) as downloader:
+            # Resume 模式：只下载缺失的论文
+            if resume:
+                papers_to_download = downloader.filter_missing_papers(paper_list.papers)
+                click.echo(f"⚡ Resume 模式：跳过已下载的论文，只处理 {len(papers_to_download)} 篇缺失论文")
+                success_count = downloader.download_papers(papers_to_download, max_download)
+            else:
+                success_count = downloader.download_papers(paper_list.papers, max_download)
 
             # 显示下载统计
             stats = downloader.get_download_stats()
@@ -224,6 +321,75 @@ def venues():
     click.echo("-" * 30)
     for venue in SUPPORTED_VENUES:
         click.echo(f"  • {venue}")
+
+
+@cli.command()
+@click.option('--output', '-o', default='papers', type=str, help='论文目录路径')
+def status(output):
+    """检查下载状态（基于 metadata.json）"""
+    import json
+    from src.models.paper import Paper
+
+    output = os.path.abspath(output)
+    metadata_path = os.path.join(output, "metadata.json")
+
+    if not os.path.exists(metadata_path):
+        click.echo(f"错误: 找不到 metadata.json 文件: {metadata_path}")
+        click.echo("提示: 需要先运行一次下载生成 metadata.json")
+        sys.exit(1)
+
+    try:
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        # 重建 Paper 对象并检查状态
+        total = len(metadata)
+        downloaded = 0
+        missing = 0
+        incomplete = 0
+
+        config = get_config()
+        config.set('downloader', 'output_dir', output)
+
+        with PaperDownloader(config) as downloader:
+            for item in metadata:
+                paper = Paper(
+                    title=item['title'],
+                    pdf_url=item['pdf_url'],
+                    venue=item['venue'],
+                    year=item['year'],
+                    abstract_id=item.get('abstract_id')
+                )
+                pdf_path, _ = downloader._get_file_paths(paper)
+
+                if not os.path.exists(pdf_path):
+                    missing += 1
+                elif os.path.getsize(pdf_path) < 1024:
+                    incomplete += 1
+                else:
+                    downloaded += 1
+
+        click.echo(f"📊 下载状态统计")
+        click.echo(f"=" * 40)
+        click.echo(f"输出目录: {output}")
+        click.echo(f"总论文数: {total}")
+        click.echo(f"✅ 已下载: {downloaded} ({downloaded*100//total if total else 0}%)")
+        click.echo(f"❌ 缺失: {missing}")
+        click.echo(f"⚠️  不完整: {incomplete}")
+        click.echo(f"")
+
+        need_download = missing + incomplete
+        if need_download > 0:
+            click.echo(f"💡 提示: 运行以下命令重新下载失败的论文：")
+            click.echo(f"   python main.py download -o \"{output}\" --resume")
+        else:
+            click.echo(f"✅ 所有论文都已成功下载！")
+
+    except Exception as e:
+        click.echo(f"错误: 检查状态失败: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 @cli.command()

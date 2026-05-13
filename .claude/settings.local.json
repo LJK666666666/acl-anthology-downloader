@@ -12,7 +12,9 @@
       "Bash(git reset:*)",
       "Bash(git commit:*)",
       "WebFetch(domain:aclanthology.org)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(python -c \"import json; print\\('Papers in metadata:', len\\(json.load\\(open\\('test_resume/metadata.json', encoding='utf-8'\\)\\)\\)\\)\")"
     ],
     "deny": [],
     "ask": []

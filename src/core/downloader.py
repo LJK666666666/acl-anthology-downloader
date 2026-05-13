@@ -22,11 +22,12 @@ from ..config.constants import (
 class PaperDownloader:
     """论文文件下载器"""
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Optional[Config] = None, resume_mode: bool = False):
         """
         初始化下载器
         Args:
             config: 配置对象
+            resume_mode: 是否为恢复模式（不覆盖 metadata.json）
         """
         self.config = config or Config()
         self.output_dir = os.path.abspath(self.config.get('downloader', 'output_dir', 'papers'))
@@ -34,6 +35,7 @@ class PaperDownloader:
         self.max_filename_length = self.config.get('downloader', 'max_filename_length', 100)
         self.create_year_dirs = self.config.get('downloader', 'create_year_dirs', True)
         self.create_venue_dirs = self.config.get('downloader', 'create_venue_dirs', True)
+        self.resume_mode = resume_mode
 
         # 创建下载会话
         self.session = self._create_session()
@@ -46,6 +48,22 @@ class PaperDownloader:
         })
         session.timeout = self.config.get('scraper', 'timeout', 30)
         return session
+
+    def filter_missing_papers(self, papers: List[Paper]) -> List[Paper]:
+        """
+        过滤出缺失或不完整的论文
+        Args:
+            papers: 论文列表
+        Returns:
+            需要下载的论文列表
+        """
+        missing_papers = []
+        for paper in papers:
+            pdf_path, _ = self._get_file_paths(paper)
+            # 文件不存在或文件太小（不完整）
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) < 1024:
+                missing_papers.append(paper)
+        return missing_papers
 
     def download_papers(self, papers: List[Paper], max_download: Optional[int] = None) -> int:
         """
@@ -93,8 +111,9 @@ class PaperDownloader:
                 if delay > 0:
                     time.sleep(delay)
 
-        # 保存元数据
-        self._save_metadata(papers)
+        # 保存元数据（resume 模式不覆盖）
+        if not self.resume_mode:
+            self._save_metadata(papers)
 
         return success_count
 
